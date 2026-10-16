@@ -98,7 +98,7 @@ jobs:
       - name: terraform init
         working-directory: ${{ env.WORKLOAD_DIR }}
         run: |
-          terraform init -input=false \
+          terraform init -input=false -lock=false \
             -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
             -backend-config="prefix=${STATE_PREFIX}"
 
@@ -154,7 +154,7 @@ jobs:
             } else {
               await github.rest.issues.createComment({ owner, repo, issue_number, body });
             }
-
+  
   # ------------------------------------------------------------------ approval-gated identity
   apply:
     name: apply (needs approval)
