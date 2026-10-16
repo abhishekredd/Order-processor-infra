@@ -1,0 +1,6 @@
+# Copy to terraform.tfvars (git-ignored). Values that identify YOU or your billing, not the environment.
+billing_account   = "XXXXXX-XXXXXX-XXXXXX"
+org_id            = "123456789012" # remove if you have no organization
+github_repo       = "OWNER/REPO"
+state_bucket_name = "YOUR-TFSTATE-BUCKET"
+# quota_project   = "my-admin-project"

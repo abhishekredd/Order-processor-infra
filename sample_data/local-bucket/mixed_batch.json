@@ -1,0 +1,6 @@
+[
+  {"OrderId": "ORD-2001", "CustomerId": "CUS-1", "OrderDate": "2026-09-25T10:30:00Z", "TotalAmount": "10.00", "OrderStatus": "NEW", "InternalReference": "X"},
+  {"OrderId": "ORD-2002", "OrderStatus": "NEW"},
+  {"OrderId": "ORD-2003", "CustomerId": "CUS-3", "OrderDate": "2026-09-25T10:30:00Z", "TotalAmount": "abc", "OrderStatus": "NEW"},
+  {"OrderId": "ORD-2004", "CustomerId": "CUS-4", "OrderDate": "2026-09-26T08:00:00+05:30", "TotalAmount": 20, "OrderStatus": "SHIPPED"}
+]

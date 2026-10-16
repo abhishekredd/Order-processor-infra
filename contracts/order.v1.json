@@ -1,0 +1,18 @@
+{
+  "urn": "urn:edp:contract:order:1.0.0",
+  "version": "1.0.0",
+  "schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "Order",
+    "type": "object",
+    "required": ["order_id", "customer_id", "order_date", "total_amount", "status"],
+    "properties": {
+      "order_id": {"type": "string", "minLength": 1},
+      "customer_id": {"type": "string", "minLength": 1},
+      "order_date": {"type": "integer", "description": "Epoch milliseconds (UTC)"},
+      "total_amount": {"type": "number"},
+      "status": {"type": "string", "minLength": 1}
+    },
+    "additionalProperties": false
+  }
+}

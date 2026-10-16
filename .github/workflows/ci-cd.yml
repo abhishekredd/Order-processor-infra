@@ -1,0 +1,87 @@
+name: app-ci-cd
+
+# Application code: test on every change, deploy from main after approval.
+# (Infrastructure is handled by terraform.yml.)
+on:
+  pull_request:
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "contracts/**"
+      - "requirements*.txt"
+      - "Dockerfile"
+      - "pytest.ini"
+      - ".github/workflows/ci-cd.yml"
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "contracts/**"
+      - "requirements*.txt"
+      - "Dockerfile"
+      - "pytest.ini"
+      - ".github/workflows/ci-cd.yml"
+
+permissions:
+  contents: read
+
+env:
+  SERVICE: ${{ vars.SERVICE_NAME || 'retailhub-order-compat-processor' }}
+  REPO: ${{ vars.ARTIFACT_REPOSITORY || 'edp-processors' }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+      - run: python -m pytest -v
+      - name: Docker build smoke test
+        run: docker build -t "${SERVICE}:ci" .
+
+  deploy:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: dev            # same approval gate as infrastructure changes
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: authenticate (gh-deployer, keyless)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.DEPLOYER_SA }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: build and push image
+        run: |
+          IMAGE="${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${REPO}/${SERVICE}:${{ github.sha }}"
+          gcloud auth configure-docker "${{ vars.GCP_REGION }}-docker.pkg.dev" --quiet
+          docker build -t "${IMAGE}" .
+          docker push "${IMAGE}"
+          echo "IMAGE=${IMAGE}" >> "${GITHUB_ENV}"
+
+      # Only the image changes here; CPU/memory/scaling stay exactly as Terraform defined them.
+      - name: deploy to Cloud Run
+        run: |
+          gcloud run deploy "${SERVICE}" \
+            --image "${IMAGE}" \
+            --region "${{ vars.GCP_REGION }}" \
+            --project "${{ vars.GCP_PROJECT_ID }}"
+
+      - name: confirm the running image
+        run: |
+          gcloud run services describe "${SERVICE}" \
+            --region "${{ vars.GCP_REGION }}" --project "${{ vars.GCP_PROJECT_ID }}" \
+            --format="value(spec.template.spec.containers[0].image)"

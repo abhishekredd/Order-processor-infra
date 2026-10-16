@@ -1,0 +1,9 @@
+# Security scan for Terraform. Exceptions are NOT listed here: each one is an inline
+# `#checkov:skip=ID:reason` next to the resource, so the justification travels with the code.
+framework:
+  - terraform
+directory:
+  - infra
+compact: true
+quiet: true
+skip-download: true   # do not call the vendor's API for policy mappings; built-in checks only

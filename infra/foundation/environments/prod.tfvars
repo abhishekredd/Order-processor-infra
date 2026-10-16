@@ -1,0 +1,6 @@
+environment             = "prod"
+project_id_prefix       = "retailhub-compat-prod"
+project_name            = "RetailHub Compat prod"
+region                  = "asia-south1"
+github_environment      = "prod"
+project_deletion_policy = "PREVENT"

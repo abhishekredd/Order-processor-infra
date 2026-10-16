@@ -1,0 +1,8 @@
+{
+  "OrderId": "ORD-1001",
+  "CustomerId": "CUS-900",
+  "OrderDate": "2026-09-25T10:30:00Z",
+  "TotalAmount": "1499.50",
+  "OrderStatus": "CONFIRMED",
+  "InternalReference": "RH-ABC-123"
+}

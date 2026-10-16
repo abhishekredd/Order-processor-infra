@@ -1,0 +1,216 @@
+name: terraform
+
+# Pull request  -> static checks + a read-only PLAN, posted on the PR. Never applies.
+# Push to main  -> static checks + PLAN, then APPLY of that same plan after reviewer approval
+#                  (GitHub Environment "dev" must have required reviewers).
+on:
+  pull_request:
+    paths:
+      - "infra/**"
+      - ".github/workflows/terraform.yml"
+  push:
+    branches: [main]
+    paths:
+      - "infra/**"
+      - ".github/workflows/terraform.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: terraform-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  TF_VERSION: "1.14.6"
+  TF_IN_AUTOMATION: "true"
+  WORKLOAD_DIR: infra/workload
+  STATE_PREFIX: retailhub-order-compat/workload/dev
+  TFVARS: environments/dev.tfvars
+
+jobs:
+  # ------------------------------------------------------------------ no cloud access needed
+  static-checks:
+    name: format, validate, lint, security scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: terraform fmt
+        run: terraform fmt -check -recursive -diff infra
+
+      - name: terraform init (no backend) + validate
+        run: |
+          for dir in infra/bootstrap infra/foundation infra/workload; do
+            echo "::group::${dir}"
+            terraform -chdir="${dir}" init -backend=false -input=false
+            terraform -chdir="${dir}" validate
+            echo "::endgroup::"
+          done
+
+      - uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: v0.54.0
+
+      - name: tflint
+        run: tflint --chdir infra --recursive --config "${GITHUB_WORKSPACE}/infra/.tflint.hcl"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: checkov (security scan)
+        run: |
+          pip install --quiet "checkov==3.3.28"
+          checkov --config-file infra/.checkov.yaml
+
+  # ------------------------------------------------------------------ read-only identity
+  plan:
+    name: plan (read-only)
+    needs: static-checks
+    # Fork PRs get no OIDC token; skip rather than fail.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
+    outputs:
+      exitcode: ${{ steps.plan.outputs.exitcode }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: authenticate (tf-plan, keyless)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.TF_PLAN_SA }}
+
+      - name: terraform init
+        working-directory: ${{ env.WORKLOAD_DIR }}
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="prefix=${STATE_PREFIX}"
+
+      - name: terraform plan
+        id: plan
+        working-directory: ${{ env.WORKLOAD_DIR }}
+        run: |
+          # -lock=false: this identity can only read state. Plans never write, so no lock is needed.
+          set +e
+          terraform plan -input=false -lock=false -detailed-exitcode \
+            -var-file="${TFVARS}" -var="project_id=${{ vars.GCP_PROJECT_ID }}" -out=tfplan
+          code=$?
+          set -e
+          echo "exitcode=${code}" >> "${GITHUB_OUTPUT}"
+          if [ "${code}" -eq 1 ]; then exit 1; fi   # 0 = no changes, 2 = changes, 1 = error
+          terraform show -no-color tfplan > plan.txt
+          {
+            echo "### Terraform plan (dev) - exit code ${code}"
+            echo '```'
+            head -c 60000 plan.txt
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: keep the exact plan for the apply job
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan
+          path: |
+            ${{ env.WORKLOAD_DIR }}/tfplan
+            ${{ env.WORKLOAD_DIR }}/plan.txt
+          retention-days: 3
+
+      - name: post plan on the pull request
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        env:
+          PLAN_EXIT: ${{ steps.plan.outputs.exitcode }}
+        with:
+          script: |
+            const fs = require('fs');
+            const fence = '`'.repeat(3);
+            const marker = '<!-- terraform-plan -->';
+            let plan = fs.readFileSync(process.env.WORKLOAD_DIR + '/plan.txt', 'utf8');
+            if (plan.length > 60000) plan = plan.slice(0, 60000) + '\n... truncated, see the workflow summary';
+            const verdict = process.env.PLAN_EXIT === '0' ? 'No changes.' : 'Changes detected. Nothing is applied until this is merged and approved.';
+            const body = `${marker}\n### Terraform plan (dev)\n${verdict}\n\n${fence}\n${plan}\n${fence}`;
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number });
+            const existing = comments.find(c => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
+
+  # ------------------------------------------------------------------ approval-gated identity
+  apply:
+    name: apply (needs approval)
+    needs: plan
+    # Only on main, only if the plan has changes. Pull requests can never reach this job.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.plan.outputs.exitcode == '2'
+    runs-on: ubuntu-latest
+    environment: dev            # required reviewers + main-only deployments are configured on this environment
+    permissions:
+      contents: read
+      id-token: write
+    concurrency:
+      group: terraform-apply-dev
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: authenticate (tf-apply, keyless)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.TF_APPLY_SA }}
+
+      - name: fetch the reviewed plan
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan
+          path: ${{ env.WORKLOAD_DIR }}
+
+      - name: terraform init
+        working-directory: ${{ env.WORKLOAD_DIR }}
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="prefix=${STATE_PREFIX}"
+
+      - name: terraform apply (the saved plan, with state locking)
+        working-directory: ${{ env.WORKLOAD_DIR }}
+        run: terraform apply -input=false tfplan
+
+      - name: confirm a second plan is clean
+        working-directory: ${{ env.WORKLOAD_DIR }}
+        run: |
+          set +e
+          terraform plan -input=false -detailed-exitcode \
+            -var-file="${TFVARS}" -var="project_id=${{ vars.GCP_PROJECT_ID }}"
+          code=$?
+          set -e
+          if [ "${code}" -eq 2 ]; then
+            echo "::error::Plan after apply still proposes changes (drift or a non-idempotent configuration)."
+            exit 1
+          fi
+          if [ "${code}" -ne 0 ]; then exit "${code}"; fi
+          echo "No further changes required."
