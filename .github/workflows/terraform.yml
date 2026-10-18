@@ -214,5 +214,3 @@ jobs:
           fi
           if [ "${code}" -ne 0 ]; then exit "${code}"; fi
           echo "No further changes required."
-terraform.yml
-Displaying terraform.yml.
