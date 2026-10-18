@@ -39,8 +39,7 @@ locals {
     "roles/resourcemanager.projectIamAdmin", # project-level bindings (eventReceiver, GCS agent)
   ]
 
-  # Token subject GitHub issues to a job that declares `environment: <name>`.
-  environment_subject = "repo:${var.github_repo}:environment:${var.github_environment}"
+
 }
 
 # 1. The project and its APIs
@@ -104,13 +103,13 @@ resource "google_service_account_iam_member" "plan_from_repo" {
 resource "google_service_account_iam_member" "apply_from_environment" {
   service_account_id = "projects/${local.project_id}/serviceAccounts/${module.ci_identities.emails["tf_apply"]}"
   role               = "roles/iam.workloadIdentityUser"
-  member             = "principal://iam.googleapis.com/${module.github_wif.pool_name}/subject/${local.environment_subject}"
+  member             = "principalSet://iam.googleapis.com/${module.github_wif.pool_name}/attribute.environment/${var.github_environment}"
 }
 
 resource "google_service_account_iam_member" "deployer_from_environment" {
   service_account_id = "projects/${local.project_id}/serviceAccounts/${module.ci_identities.emails["deployer"]}"
   role               = "roles/iam.workloadIdentityUser"
-  member             = "principal://iam.googleapis.com/${module.github_wif.pool_name}/subject/${local.environment_subject}"
+  member             = "principalSet://iam.googleapis.com/${module.github_wif.pool_name}/attribute.environment/${var.github_environment}"
 }
 
 # 4. Access to the shared state bucket (it lives in the admin project, outside this one).
