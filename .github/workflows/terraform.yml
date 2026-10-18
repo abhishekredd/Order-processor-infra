@@ -90,16 +90,10 @@ jobs:
           terraform_wrapper: false
 
       - name: authenticate (tf-plan, keyless)
-        id: auth
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ vars.WIF_PROVIDER }}
           service_account: ${{ vars.TF_PLAN_SA }}
-          token_format: 'access_token'
-          access_token_lifetime: '300s'
-
-      - name: export access token for terraform
-        run: echo "GOOGLE_OAUTH_ACCESS_TOKEN=${{ steps.auth.outputs.access_token }}" >> $GITHUB_ENV
 
       - name: terraform init
         working-directory: ${{ env.WORKLOAD_DIR }}
@@ -133,7 +127,8 @@ jobs:
         with:
           name: tfplan
           path: |
-            ${{ env.WORKLOAD_DIR }}/tfplan${{ env.WORKLOAD_DIR }}/plan.txt
+            ${{ env.WORKLOAD_DIR }}/tfplan
+            ${{ env.WORKLOAD_DIR }}/plan.txt
           retention-days: 3
 
       - name: post plan on the pull request
@@ -159,7 +154,7 @@ jobs:
             } else {
               await github.rest.issues.createComment({ owner, repo, issue_number, body });
             }
-
+  
   # ------------------------------------------------------------------ approval-gated identity
   apply:
     name: apply (needs approval)
@@ -183,16 +178,10 @@ jobs:
           terraform_wrapper: false
 
       - name: authenticate (tf-apply, keyless)
-        id: auth
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ vars.WIF_PROVIDER }}
           service_account: ${{ vars.TF_APPLY_SA }}
-          token_format: 'access_token'
-          access_token_lifetime: '300s'
-
-      - name: export access token for terraform
-        run: echo "GOOGLE_OAUTH_ACCESS_TOKEN=${{ steps.auth.outputs.access_token }}" >> $GITHUB_ENV
 
       - name: fetch the reviewed plan
         uses: actions/download-artifact@v4
@@ -225,3 +214,5 @@ jobs:
           fi
           if [ "${code}" -ne 0 ]; then exit "${code}"; fi
           echo "No further changes required."
+terraform.yml
+Displaying terraform.yml.

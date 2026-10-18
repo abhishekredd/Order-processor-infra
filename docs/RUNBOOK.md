@@ -129,7 +129,7 @@ First find which job and step failed, then use the table.
 | `tflint` | Lint rule | The message names the rule |
 | `checkov` | Security finding | Fix it, or add an inline `#checkov:skip=ID:reason` that a reviewer must accept |
 | `authenticate` ("rejected by the attribute condition", "unable to acquire impersonated credentials") | Trust mismatch | See the list below |
-| `terraform init` (backend) | Wrong bucket/prefix, or no state access | Check variable `TF_STATE_BUCKET` and the foundation's state-bucket grants |
+| `terraform init` (backend) | Wrong bucket/prefix, no state access, or service-account impersonation denied | Check `TF_STATE_BUCKET` and the foundation IAM grants below. `iam.serviceAccounts.getAccessToken` points to the WIF-to-service-account grant, not the bucket's object permissions. |
 | `terraform plan` permission error | The read-only identity lacks a read permission | The error names it; add the narrowest read role to `tf-plan` |
 | `apply` job never starts | Waiting for approval, **or** the plan had no changes (exit 0), which skips apply by design | Approve in the Actions run; otherwise nothing to do |
 | `apply` job fails | See scenario 3 | |
@@ -144,7 +144,9 @@ First find which job and step failed, then use the table.
 3. `github_repo` in the foundation matches the repository exactly (case-sensitive).
 4. Apply/deploy jobs declare `environment: dev`, and it equals `github_environment` in the foundation.
 5. The run is not from a fork (forks get no OIDC token).
-6. The binding exists: `gcloud iam service-accounts get-iam-policy tf-apply@$P.iam.gserviceaccount.com`.
+6. The foundation's service-account bindings exist for `tf-plan` (the repository principal set) and `tf-apply`/`gh-deployer` (the protected environment subject). Check with `gcloud iam service-accounts get-iam-policy "$TF_PLAN_SA" --project="$GCP_PROJECT_ID"` and the corresponding command for the other service accounts.
+
+**`iam.serviceAccounts.getAccessToken` denied during `terraform init`:** The service account selected by the failing job must grant `roles/iam.workloadIdentityUser` to that job's GitHub principal. The `tf-plan` account trusts the repository principal set; `tf-apply` trusts the configured GitHub environment subject. That role includes `getAccessToken`; do not add the broader `roles/iam.serviceAccountTokenCreator` role. Confirm the service-account and `WIF_PROVIDER` variables match `terraform output github_repository_variables`. If the binding is missing or stale, initialize and apply the foundation from `infra/foundation` (`terraform init -backend-config=backend.hcl`, then `terraform apply -var-file=environments/dev.tfvars`), then allow IAM changes a few minutes to propagate and rerun the workflow.
 
 **Ordering trap:** the application workflow fails at authentication if the foundation has not been applied or the GitHub variables are missing.
 
