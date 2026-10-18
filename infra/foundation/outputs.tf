@@ -40,3 +40,8 @@ output "github_repository_variables" {
     TF_STATE_BUCKET = var.state_bucket_name
   }
 }
+
+output "gcs_service_agent" {
+  description = "Cloud Storage service agent. Reading it in this stack is what creates it; the workload stack grants it pubsub.publisher."
+  value       = data.google_storage_project_service_account.gcs.email_address
+}

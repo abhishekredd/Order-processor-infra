@@ -112,6 +112,13 @@ resource "google_service_account_iam_member" "deployer_from_environment" {
   member             = "principalSet://iam.googleapis.com/${module.github_wif.pool_name}/attribute.environment/${var.github_environment}"
 }
 
+# Cloud Storage's service agent is created lazily, the first time something asks for it, and a new project
+# does not have it yet. Reading it here (as a human with the rights to) creates it, so the workload stack
+# can grant it pubsub.publisher for EventArc without hitting "service account does not exist".
+data "google_storage_project_service_account" "gcs" {
+  project = local.project_id
+}
+
 # 4. Access to the shared state bucket (it lives in the admin project, outside this one).
 resource "google_storage_bucket_iam_member" "state_bucket_reader" {
   for_each = {
