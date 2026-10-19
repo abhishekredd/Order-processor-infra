@@ -4,7 +4,7 @@ region      = "asia-south1"
 
 # Cloud Run sizing
 cpu           = "1"
-memory        = "1Gi"
+memory        = "512Mi"
 concurrency   = 80
 min_instances = 0
 max_instances = 2
