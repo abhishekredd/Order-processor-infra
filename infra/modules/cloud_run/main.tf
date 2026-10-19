@@ -43,6 +43,9 @@ resource "google_cloud_run_v2_service" "this" {
       template[0].containers[0].image,
       client,
       client_version,
+      # Google reports a service-level `scaling` block (all zeros) that we never set. Instance counts are
+      # managed in `template[0].scaling`, which is NOT ignored. Without this, every plan proposes removing it.
+      scaling,
     ]
   }
 }
